@@ -1,188 +1,134 @@
 import copy
 import networkx as nx
+
 from database.DAO import DAO
 
 
 class Model:
-
     def __init__(self):
         self._grafo = nx.DiGraph()
-        self._AllArtist = DAO.getAllArtist()
+        self._artisti = DAO.getAllArtist()
         self._idMap = {}
-        for a in self._AllArtist:
+        for a in self._artisti:
             self._idMap[a.ArtistId] = a
+        self._elencoInfluenzaArtisti=[]
 
-    def getAllArtist(self):
-        return DAO.getAllArtist()
 
     def getAllGenre(self):
         return DAO.getAllGenre()
 
-    def getAllNodes(self, codGenre):
-        return DAO.getAllNodes(codGenre)
+    def getAllNodes(self, genere):
+        return DAO.getAllNodes(genere)
 
-    def addEdges(self, codGenere):
-        allEdges = DAO.getAllEdges(codGenere, self._idMap)
-        if len(allEdges) == 0:
-            print("Nessun nodo trovato")
-            return
+    def getAllPopolarita(self, genere):
+        return DAO.getAllEdges(genere, self._idMap)
 
-        # Per rispettare rigorosamente il vincolo sui nodi del grafo pre-inseriti
-        # creiamo una mappa rapida {Id_Artista: Oggetto_Popolarita}
-        pop_map = {p.artist.ArtistId: p for p in allEdges}
-
-        # Poiché non possiamo modificare il DAO per fare la query sui co-acquisti,
-        # e assumendo che la richiesta consideri le relazioni tra tutti gli artisti
-        # estratti da getAllEdges che hanno una popolarità valorizzata (e quindi acquistati):
-        for i in range(len(allEdges)):
-            for j in range(i + 1, len(allEdges)):
-                u = allEdges[i]
-                v = allEdges[j]
-
-                # 1. CONTROLLO CRUCIALE: Hanno almeno un cliente (compratore) in comune?
-                # .intersection() interseca i due set. Se l'intersezione contiene elementi,
-                # viene valutata come True, altrimenti se è un set vuoto viene valutata come False.
-                if u.ListaClienti.intersection(v.ListaClienti):
-                    # 2. Assicuriamoci che i nodi esistano effettivamente nel grafo
-                    if self._grafo.has_node(u.artist) and self._grafo.has_node(v.artist):
-                        peso_arco = u.pop + v.pop
-
-                        if u.pop > v.pop:
-                            self._grafo.add_edge(
-                                 u.artist, v.artist, weight=peso_arco
-                            )
-                        elif v.pop > u.pop:
-                            self._grafo.add_edge(
-                                v.artist, u.artist, weight=peso_arco
-                            )
+    def addEdges(self, genere):
+        elenco_pop= self.getAllPopolarita(genere)
+        for i in range(len(elenco_pop)):
+            for j in range(i+1, len(elenco_pop)):
+                nodoA= elenco_pop[i]
+                nodoB= elenco_pop[j]
+                if self._grafo.has_node(nodoA.artist) and self._grafo.has_node(nodoB.artist):
+                    #Controllo sull'intersezione degli acquirenti dei brani dei due artisti
+                    if nodoA.ListaClienti.intersection(nodoB.ListaClienti): #Indica se c'è almeno un'intersezione
+                        #Controllo sul peso degli archi per capire la direzione in cui inserirlo
+                        peso_arco = nodoA.pop + nodoB.pop
+                        if nodoA.pop > nodoB.pop:
+                            self._grafo.add_edge(nodoA.artist, nodoB.artist, weight= peso_arco)
+                        elif nodoA.pop < nodoB.pop:
+                            self._grafo.add_edge(nodoB.artist, nodoA.artist, weight = peso_arco)
                         else:
-                            # Stessa popolarità -> Entrambi i versi
-                            self._grafo.add_edge(
-                                u.artist, v.artist, weight=peso_arco
-                            )
-                            self._grafo.add_edge(
-                                v.artist, u.artist, weight=peso_arco
-                            )
+                            self._grafo.add_edge(nodoA.artist, nodoB.artist, weight=peso_arco)
+                            self._grafo.add_edge(nodoB.artist, nodoA.artist, weight=peso_arco)
 
-    def buildGraph(self, codGenere):
+
+    def buildGraph(self, genere):
         self._grafo.clear()
-        allNodes = self.getAllNodes(codGenere)
-        self._grafo.add_nodes_from(allNodes)
-        self.addEdges(codGenere)
+        elencoNodi = self.getAllNodes(genere)
+        self._grafo.add_nodes_from(elencoNodi)
+        self.addEdges(genere)
+        self.getGraphDetails()
 
-    # SOSTITUISCE: trovaArtistaTop con il calcolo richiesto dell'influenza
-    def calcolaArtistaPiuInfluente(self):
-        #Inizializzo le variabili di confronto
-        best_artist = None
-        max_influenza = float("-inf")
-        #Inizio a ciclare per ogni nodo del mio grafo
-        for nodo in self._grafo.nodes():
-            # Calcolo dei pesi uscenti dal nodo considerato
-            peso_uscente = 0
-            for u, v, diz_attributi in self._grafo.out_edges(nodo, data=True):
-                peso_uscente += diz_attributi["weight"]
-            # Calcolo dei pesi entranti
-            peso_entrante=0
-            for u, v, diz_attributi in self._grafo.in_edges(nodo, data=True):
-                peso_entrante += diz_attributi["weight"]
-
-            influenza = peso_uscente - peso_entrante
-
-            if influenza > max_influenza:
-                max_influenza = influenza
-                best_artist = nodo
-
-        return best_artist, max_influenza
-
-    # NUOVO METODO: Recupera i 5 archi con peso maggiore
-    def getTop5Archi(self):
-        archi_pesati = []
-        for u, v, data in self._grafo.edges(data=True):
-            archi_pesati.append((u, v, data["weight"]))
-
-        # Ordina in ordine decrescente in base al peso (elemento in posizione 2)
-        archi_pesati.sort(key=lambda x: x[2], reverse=True)
-        return archi_pesati[:5]
-
-    def getInformatinGraph(self):
+    def getGraphDetails(self):
+        print(f"{len(self._grafo.nodes())} nodi -- {len(self._grafo.edges())} archi")
         return len(self._grafo.nodes()), len(self._grafo.edges())
 
-##### PUNTO 2 #####
-    # Metodo di utilità per il Controller per ottenere i nodi correnti
+    def getTopArtist(self):
+        elencoArtisti = self._grafo.nodes()
+        topArtist = None
+        influenza_max=-1
+        for a in elencoArtisti:
+            peso_uscente = 0
+            for u, v, diz_attributi in self._grafo.out_edges(a, data=True):
+                peso_uscente += diz_attributi["weight"]
+            # Calcolo dei pesi entranti
+            peso_entrante = 0
+            for u, v, diz_attributi in self._grafo.in_edges(a, data=True):
+                peso_entrante += diz_attributi["weight"]
+            influenza = peso_uscente - peso_entrante
+            self._elencoInfluenzaArtisti.append((a, influenza))
+            if influenza > influenza_max:
+                topArtist=a
+                influenza_max=influenza
+        return topArtist, influenza_max
+
+    def getTop5(self):
+        lista_ordinata = sorted(self._elencoInfluenzaArtisti, key=lambda x: x[1], reverse = True)
+        return lista_ordinata[:5]
+
     def getNodes(self):
-        return list(self._grafo.nodes())
+        return self._grafo.nodes()
 
-    # Metodo di utilità per recuperare il peso di un arco specifico
     def getPesoArco(self, u, v):
-        return self._grafo[u][v]['weight']
-
-    import copy
+        return self._grafo[u][v]["weight"]
 
     def getPath(self, v0):
-        # Inizializzazione della struttura dati fornita
-        parziale = [v0]
-
-        # Inizializziamo le variabili d'istanza per memorizzare la soluzione migliore
-        self._bestPath = []
-        self._costoCammino = -1  # Valore iniziale per la ricerca del massimo
-
-        # Esploriamo i vicini del nodo di partenza v0
-        # Nota: usiamo successors() perché il grafo è diretto (DiGraph)
+        parziale =[v0]
+        self._bestPath=[]
+        self._costoCammino = -1
+        #Inizio a ciclare sui vicini del mio nodo
         for v in self._grafo.successors(v0):
             parziale.append(v)
-
-            # Avviamo la ricorsione passando il cammino iniziale [v0, v]
-            self.ricorsione(parziale)
-
-            # Backtracking: Rimuoviamo il vicino per testare le altre strade nel ciclo (Aggiunte le parentesi)
+            self._ricorsione(parziale)
             parziale.pop()
+        return self._bestPath, self._costoCammino
 
-        return self._bestPath
-
-    def ricorsione(self, parziale):
-        # 1. VERIFICO SE LA SOLUZIONE PARZIALE È MIGLIORE DEL BEST -- Ottimalità
-        # Utilizziamo la funzione _score fornita nel tuo pattern per calcolare il peso totale
+    def _ricorsione(self, parziale):
         punteggio_attuale = self._score(parziale)
-
-        if punteggio_attuale > self._costoCammino:
+        if punteggio_attuale > self._costoCammino: #Ricerca il cammino con costo massimo
             self._bestPath = copy.deepcopy(parziale)
             self._costoCammino = punteggio_attuale
-
-        # 2. VERIFICO SE HA SENSO CONTINUARE -- Terminazione (Non ci sono vincoli di interruzione precoce)
-
-        # 3. FACCIO LA MIA RICORSIONE
-        # Il nodo corrente da cui cercare i successivi è sempre l'ultimo inserito nel cammino
+        #Definisco i controlli i base ai quali stabilisco se aggiungere o meno un nodo per
+        #proseguire il mio cammino
         nodo_corrente = parziale[-1]
-
-        # Recuperiamo i vicini (successori) dell'ultimo nodo (corretto l'errore delle foto)
         for v in self._grafo.successors(nodo_corrente):
-
-            # Vincolo fondamentale: il cammino deve essere SEMPLICE (niente cicli/ripassaggi)
             if v not in parziale:
-
-                # Peso del potenziale arco che andremmo ad aggiungere (es. da parziale[-1] a v)
-                pesoE = self._grafo[nodo_corrente][v]["weight"]
-
-                # Peso dell'ultimo arco che abbiamo attraversato per arrivare qui (da parziale[-2] a parziale[-1])
+                pesoE = self.getPesoArco(nodo_corrente, v)
                 nodo_precedente = parziale[-2]
-                peso_precedente = self._grafo[nodo_precedente][nodo_corrente][
-                    "weight"
-                ]
-
-                # CONDIZIONE 2.C: Il peso del nuovo arco deve essere STRETTAMENTE CRESCENTE
-                if pesoE > peso_precedente:
+                peso_prec = self.getPesoArco(nodo_precedente, nodo_corrente)
+                if pesoE > peso_prec: #Cammino ad archi con peso crescente
                     parziale.append(v)
-
-                    # Chiamata ricorsiva (corretto il nome del metodo in self.ricorsione)
-                    self.ricorsione(parziale)
-
-                    # Backtracking
+                    self._ricorsione(parziale)
                     parziale.pop()
 
     def _score(self, parziale):
         score = 0
-        # Corretto il bug sintattico delle foto: len(parziale) - 1
-        # Iteriamo su tutti gli archi sequenziali del cammino parziale per sommarne i pesi
-        for i in range(len(parziale) - 1):
-            score += self._grafo[parziale[i]][parziale[i + 1]]["weight"]
+        for i in range(len(parziale)-1):
+            score += self._grafo[parziale[i]][parziale[i+1]]["weight"]
         return score
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
